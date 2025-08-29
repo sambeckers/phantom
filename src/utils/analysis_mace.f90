@@ -115,7 +115,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
      xilist = 0.
      
     !$omp parallel do default(none) schedule(dynamic) &
-    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev) &
+    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose) &
     !$omp shared(abundance,abundance_prev,particlemass,unit_density,udist) &
     !$omp shared(ieos,gamma,gmw,time,completed_iterations,column_density,AuvAv,albedo) &
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
