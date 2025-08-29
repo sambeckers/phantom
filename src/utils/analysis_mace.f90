@@ -50,11 +50,45 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  real,             intent(in) :: particlemass,time
  real, save    :: tprev = 0.
  integer, save :: nprev = 0
- real          :: dt_cgs, rho_cgs, rholist(maxp), Tlist(maxp), mulist(maxp), Auvlist(maxp), xilist(maxp) &
- , numberdensity, T_gas, gammai, mui, AUV, xi
+ real          :: dt_cgs, rho_cgs, numberdensity, T_gas, gammai, mui, AUV, xi &
+                , rholist(npart), Tlist(npart), mulist(npart), Auvlist(npart), xilist(npart)
  real          :: abundance_part(krome_nmols), Y(krome_nmols), column_density(npart), xyzh_copy(4,npart)
  real          :: max_radius, radius
  integer       :: i, j, i_radius, ierr, completed_iterations, npart_copy = 0
+ integer       :: ui=10,ios, ntrack
+ integer, allocatable :: track_id(:)
+
+   ! read file with particle IDs to track and store IDs in array
+    open(ui, file='../particle_IDs.txt', status='old', action='read')
+    ntrack = 0
+   do
+        read(ui,*,iostat=ios)
+        if (ios /= 0) exit
+        ntrack = ntrack + 1
+    end do
+    allocate(track_id(ntrack))
+
+
+    rewind(ui)
+    do i=1,ntrack
+        read(ui,*) track_id(i)
+    end do
+    close(ui) 
+    print*, "Tracking ", ntrack, " particles"
+
+   ! create mask array to only compute chemistry for tracked particles
+    if (.not.allocated(mask)) then
+       allocate(mask(npart))
+    endif
+    mask = .false.
+    do i=1,ntrack
+       do j=1,npart
+          if (iorig(j) == track_id(i)) then
+             mask(j) = .true.
+             exit
+          endif
+       enddo
+    enddo
 
  if (.not.done_init) then
     done_init = .true.
@@ -62,24 +96,24 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     call krome_init()
     print*, "Initialised KROME"
     abundance_label(:) = krome_get_names()
-    allocate(abundance(krome_nmols,maxp))
+    allocate(abundance(krome_nmols,npart))
     abundance = 0.
-    allocate(abundance_prev(krome_nmols,maxp))
+    allocate(abundance_prev(krome_nmols,npart))
     abundance_prev = 0.
-    allocate(one(maxp))
+    allocate(one(npart))
     one = 1.
-    allocate(iorig_old(maxp))
+    allocate(iorig_old(npart))
     iorig_old = 0
-    allocate(iprev(maxp))
+    allocate(iprev(npart))
     iprev = 0
     print*, "setting abundances"
    !$omp parallel do default(none) &
    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev) &
-   !$omp shared(abundance,abundance_prev,particlemass,unit_density) &
+   !$omp shared(abundance,mask, abundance_prev,particlemass,unit_density) &
    !$omp shared(ieos,rho_cgs,T_gas,j) &
    !$omp private(i,abundance_part)
     do i=1, npart
-       if (.not.isdead_or_accreted(xyzh(4,i))) then
+      if (.not.isdead_or_accreted(xyzh(4,i))) then
           call chem_init(abundance_part)
           abundance(:,i) = abundance_part
        endif
@@ -109,19 +143,19 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     column_density = column_density + rhoh(xyzh(4,i_radius),particlemass)*unit_density * max_radius * udist
 
     rholist = 0.
-      Tlist = 0.
-     mulist = 0.
+     Tlist = 0.
+    mulist = 0.
     Auvlist = 0.
      xilist = 0.
      
     !$omp parallel do default(none) schedule(dynamic) &
     !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose) &
-    !$omp shared(abundance,abundance_prev,particlemass,unit_density,udist) &
+    !$omp shared(abundance,abundance_prev,particlemass,unit_density,udist, mask) &
     !$omp shared(ieos,gamma,gmw,time,completed_iterations,column_density,AuvAv,albedo) &
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
     !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi)
     outer: do i=1,npart
-       if (.not.isdead_or_accreted(xyzh(4,i))) then
+       if (mask(i) .and. .not.isdead_or_accreted(xyzh(4,i))) then
           inner: do j=1,nprev
              if (iorig(i) == iorig_old(j)) then
                 iprev(i) = j
@@ -171,7 +205,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     enddo outer
  endif
 
- call write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist)
+ call write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist,mask)
  nprev = npart
  tprev = time
  iorig_old(1:npart) = iorig(1:npart)
@@ -209,26 +243,29 @@ real function get_xi(AUV)
 
 end function get_xi
 
-subroutine write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist)
+subroutine write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist,mask)
  use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
        krome_idx_H,krome_idx_S,krome_idx_Fe,krome_idx_Si,krome_idx_Mg,&
        krome_idx_Na,krome_idx_P,krome_idx_F,krome_idx_CO,krome_idx_C2H2,&
        krome_idx_C2H,krome_idx_H2,krome_idx_SiNC,krome_idx_e
  integer, intent(in)          :: npart
  character(len=*), intent(in) :: dumpfile
-   real, intent(in)          :: rholist(*), Tlist(*), mulist(*), Auvlist(*), xilist(*)
+ real, intent(in)             :: rholist(*), Tlist(*), mulist(*), Auvlist(*), xilist(*)
+ logical, intent(in)          :: mask(*)
  integer :: i, iu
 
  open(newunit=iu, file=dumpfile//'.comp', status='replace', action='write')
  write(iu, *) '# H, He, C, N, O, S, Fe, Si, Mg, Na, P, F, CO, C2H2, C2H, H2, SiNC, e-'
  do i=1, npart
-    write(iu, *) abundance(krome_idx_H, i),  abundance(krome_idx_He, i),   abundance(krome_idx_C, i),   &
-                 abundance(krome_idx_N, i),  abundance(krome_idx_O, i),    abundance(krome_idx_S, i),   &
-                 abundance(krome_idx_Fe, i), abundance(krome_idx_Si, i),   abundance(krome_idx_Mg, i),  &
-                 abundance(krome_idx_Na, i), abundance(krome_idx_P, i),    abundance(krome_idx_F, i),   &
-                 abundance(krome_idx_CO, i), abundance(krome_idx_C2H2, i), abundance(krome_idx_C2H, i), &
-                 abundance(krome_idx_H2, i), abundance(krome_idx_SiNC, i), abundance(krome_idx_e, i), rholist(i), &
-                 Tlist(i), mulist(i), Auvlist(i), xilist(i)
+   if (mask(i)) then
+      write(iu, *) abundance(krome_idx_H, i),  abundance(krome_idx_He, i),   abundance(krome_idx_C, i),   &
+                  abundance(krome_idx_N, i),  abundance(krome_idx_O, i),    abundance(krome_idx_S, i),   &
+                  abundance(krome_idx_Fe, i), abundance(krome_idx_Si, i),   abundance(krome_idx_Mg, i),  &
+                  abundance(krome_idx_Na, i), abundance(krome_idx_P, i),    abundance(krome_idx_F, i),   &
+                  abundance(krome_idx_CO, i), abundance(krome_idx_C2H2, i), abundance(krome_idx_C2H, i), &
+                  abundance(krome_idx_H2, i), abundance(krome_idx_SiNC, i), abundance(krome_idx_e, i), rholist(i), &
+                  Tlist(i), mulist(i), Auvlist(i), xilist(i)
+   endif
  enddo
  close(iu)
  
