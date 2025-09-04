@@ -44,6 +44,10 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  use krome_main, only: krome_init, krome
  use krome_user, only: krome_get_names,krome_set_user_Auv,krome_set_user_xi,&
                        krome_set_user_alb,krome_set_user_AuvAv
+use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
+       krome_idx_H,krome_idx_S,krome_idx_Fe,krome_idx_Si,krome_idx_Mg,&
+       krome_idx_Na,krome_idx_P,krome_idx_F,krome_idx_CO,krome_idx_C2H2,&
+       krome_idx_C2H,krome_idx_H2,krome_idx_SiNC,krome_idx_e
  character(len=*), intent(in) :: dumpfile
  integer,          intent(in) :: num,npart,iunit
  real,             intent(in) :: xyzh(:,:),vxyzu(:,:)
@@ -55,25 +59,30 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  real          :: abundance_part(krome_nmols), Y(krome_nmols), column_density(npart), xyzh_copy(4,npart)
  real          :: max_radius, radius
  integer       :: i, j, i_radius, ierr, completed_iterations, npart_copy = 0
- integer       :: ui=10,ios, ntrack
+ integer       :: iu=10,ios, ntrack
  integer, allocatable :: track_id(:)
+ character(len=6) :: filename
+ integer :: isize
+
 
    ! read file with particle IDs to track and store IDs in array
-    open(ui, file='../particle_IDs.txt', status='old', action='read')
+    open(iu, file='../particle_IDs.txt', status='old', action='read', iostat=ios)
+    if (ios /= 0) call fatal(analysistype, "Could not open particle ID file")
+    print*, "Reading particle IDs from ../particle_IDs.txt"
     ntrack = 0
+    ! find number of tracked particles
    do
-        read(ui,*,iostat=ios)
+        read(iu,*,iostat=ios)
         if (ios /= 0) exit
         ntrack = ntrack + 1
     end do
     allocate(track_id(ntrack))
-
-
-    rewind(ui)
+    ! store particle IDs
+    rewind(iu)
     do i=1,ntrack
-        read(ui,*) track_id(i)
+        read(iu,*) track_id(i)
     end do
-    close(ui) 
+    close(iu) 
     print*, "Tracking ", ntrack, " particles"
 
    ! create mask array to only compute chemistry for tracked particles
@@ -85,12 +94,12 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
        do j=1,npart
           if (iorig(j) == track_id(i)) then
              mask(j) = .true.
-             exit
           endif
        enddo
     enddo
 
  if (.not.done_init) then
+   ! Initialise KROME and abundances
     done_init = .true.
     print*, "initialising KROME"
     call krome_init()
@@ -120,6 +129,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     enddo
     call init_eos(ieos, ierr)
     if (ierr /= 0) call fatal(analysistype, "Failed to initialise EOS")
+ 
  else
     dt_cgs = (time - tprev)*utime
     completed_iterations = 0
@@ -142,20 +152,15 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     enddo
     column_density = column_density + rhoh(xyzh(4,i_radius),particlemass)*unit_density * max_radius * udist
 
-    rholist = 0.
-     Tlist = 0.
-    mulist = 0.
-    Auvlist = 0.
-     xilist = 0.
      
-    !$omp parallel do default(none) schedule(dynamic) &
+    !$omp parallel do default(none) &
     !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose) &
-    !$omp shared(abundance,abundance_prev,particlemass,unit_density,udist, mask) &
-    !$omp shared(ieos,gamma,gmw,time,completed_iterations,column_density,AuvAv,albedo) &
+    !$omp shared(abundance,abundance_prev,particlemass,unit_density, mask, time, utime) &
+    !$omp shared(ieos,gamma,gmw,completed_iterations,column_density,AuvAv,albedo) &
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
-    !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi)
+    !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,filename,iu,isize)
     outer: do i=1,npart
-       if (mask(i) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+       if (mask(i) ==.true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
           inner: do j=1,nprev
              if (iorig(i) == iorig_old(j)) then
                 iprev(i) = j
@@ -167,7 +172,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
           else
              call chem_init(abundance_part)
           endif
-          if (iamtype(iphase(i)) /= iboundary .and. i > 2460 .and. mod(iorig(i), 100) == 0) then ! 2460 is the amount of boundary particles
+          if (iamtype(iphase(i)) /= iboundary .and. i > 2460) then ! 2460 is the amount of boundary particles
              !Thermodynamic quantities
              rho_cgs = rhoh(xyzh(4,i),particlemass)*unit_density
              gammai = gamma
@@ -175,37 +180,58 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
              numberdensity = rho_cgs / (mui * atomic_mass_unit)
              T_gas = get_temperature(ieos,xyzh(1:3, i),rhoh(xyzh(4,i),particlemass),vxyzu(:,i),gammai,mui)
              T_gas = max(T_gas,20.0d0)
-             
+
              !Radiation quantities
              AUV = AuvAv * column_density(i) / (mui * atomic_mass_unit) / 1.87e21
              xi = get_xi(AUV)
-             
+
              call krome_set_user_Auv(AUV)
              call krome_set_user_xi(xi)
-             call krome_set_user_alb(ALBEDO)
+             call krome_set_user_alb(albedo)
              call krome_set_user_AuvAv(AuvAv)
 
              Y = abundance_part*numberdensity
              call krome(Y,T_gas,dt_cgs)
              abundance_part = Y/numberdensity
              abundance(:,i) = abundance_part
-
-             rholist(i) = rho_cgs
-               Tlist(i) = T_gas
-              mulist(i) = mui
-             Auvlist(i) = AUV
-              xilist(i) = xi
+            
+            !$omp critical
+            write(filename, '(i6)') iorig(i)
+            inquire(file='../'//filename//'.chem', size=isize)
+            if (isize == -1) then
+               open(iu, file='../'//filename//'.chem', status='new', action='write')
+               print *, 'Creating new file for particle ', iorig(i)
+               write(iu, *) '# time(s), rho (g/cm3), T (K), mu, A_UV, xi, H, He, C, N, O, S, Fe, Si, Mg, Na, P, F, CO, C2H2, C2H, H2, SiNC, e-'
+            else if (isize == 0) then
+               open(iu, file='../'//filename//'.chem', status='old', action='write')
+               print *, 'Filling empty file for particle ', iorig(i)
+               write(iu, *) '# time(s), rho (g/cm3), T (K), mu, A_UV, xi, H, He, C, N, O, S, Fe, Si, Mg, Na, P, F, CO, C2H2, C2H, H2, SiNC, e-'
+            else
+               open(iu, file='../'//filename//'.chem', status='old', action='write', position='append')
+            endif
+            write(iu, *) time*utime , rho_cgs, T_gas, mui, AUV, xi, &
+             abundance(krome_idx_H, i),  abundance(krome_idx_He, i),   abundance(krome_idx_C, i),  &
+            abundance(krome_idx_N, i),  abundance(krome_idx_O, i),    abundance(krome_idx_S, i),   &
+            abundance(krome_idx_Fe, i), abundance(krome_idx_Si, i),   abundance(krome_idx_Mg, i),  &
+            abundance(krome_idx_Na, i), abundance(krome_idx_P, i),    abundance(krome_idx_F, i),   &
+            abundance(krome_idx_CO, i), abundance(krome_idx_C2H2, i), abundance(krome_idx_C2H, i), &
+            abundance(krome_idx_H2, i), abundance(krome_idx_SiNC, i), abundance(krome_idx_e, i)   
+            close(iu)
+            !$omp end critical
           endif
+
        endif
        if (iverbose > 1) then
           !$omp atomic
           completed_iterations = completed_iterations + 1
           print*, 'Completed ', completed_iterations, ' of ', npart
        endif
+
+
     enddo outer
  endif
-
- call write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist,mask)
+   
+ ! store current step data before moving on to next step
  nprev = npart
  tprev = time
  iorig_old(1:npart) = iorig(1:npart)
@@ -242,6 +268,7 @@ real function get_xi(AUV)
  get_xi = xi
 
 end function get_xi
+
 
 subroutine write_chem(npart, dumpfile, rholist, Tlist, mulist, Auvlist, xilist,mask)
  use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
