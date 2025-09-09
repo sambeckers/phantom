@@ -23,7 +23,6 @@ module analysis
  implicit none
  character(len=20), parameter, public :: analysistype = 'krome'
  public :: do_analysis
- logical, allocatable :: mask(:)
 
  real, allocatable    :: abundance(:,:), abundance_prev(:,:), one(:)
  character(len=16)    :: abundance_label(krome_nmols)
@@ -32,10 +31,14 @@ module analysis
  logical :: done_init = .false.
  real :: AuvAv = 4.65, albedo = 0.5
 
+ integer :: ntrack = 0
+ integer, allocatable :: track_id(:), mask(:)
+ character(len=256) :: dir
+
 contains
 
 subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
- use part,       only: isdead_or_accreted, iorig, rhoh, nptmass, xyzmh_ptmass, iReff, iboundary, igas, iphase, iamtype
+ use part,       only: isdead_or_accreted, iorig, rhoh, nptmass, xyzmh_ptmass, iReff, iboundary, igas, iphase, iamtype, maxp
  use linklist,   only: set_linklist
  use units,      only: utime,unit_density,udist
  use physcon,    only: atomic_mass_unit
@@ -59,66 +62,69 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
  real          :: abundance_part(krome_nmols), Y(krome_nmols), column_density(npart), xyzh_copy(4,npart)
  real          :: max_radius, radius
  integer       :: i, j, i_radius, ierr, completed_iterations, npart_copy = 0
- integer       :: iu=10,ios, ntrack
- integer, allocatable :: track_id(:)
+ integer       :: iu=10,ios
  character(len=6) :: filename
  integer :: isize
 
-
-   ! read file with particle IDs to track and store IDs in array
-    open(iu, file='../particle_IDs.txt', status='old', action='read', iostat=ios)
+ if (.not.done_init) then
+    ! read file with particle IDs to track and store IDs in array
+    open(iu, file='particle_IDs.txt', status='old', action='read', iostat=ios)
     if (ios /= 0) call fatal(analysistype, "Could not open particle ID file")
-    print*, "Reading particle IDs from ../particle_IDs.txt"
-    ntrack = 0
+    print*, "Reading particle IDs from particle_IDs.txt"
+
+    ! make directory to store individual particle chemistry files in dumpfile directory
+    ! get path from dumpfile
+    dir = dumpfile
+    do i=len_trim(dir),1,-1
+       if (dir(i:i) == '/') then
+          dir = dir(1:i)
+          exit
+       endif
+    enddo
+    dir = trim(dir)//'chem_output/'
+    print *, "Creating directory for chemistry output in ", dir
+    inquire(file=dir, exist=ios)
+    if (ios == 0) then
+       call system('mkdir '//dir)
+    end if
+
     ! find number of tracked particles
-   do
-        read(iu,*,iostat=ios)
-        if (ios /= 0) exit
-        ntrack = ntrack + 1
+    do
+       read(iu,*,iostat=ios)
+       if (ios /= 0) exit
+       ntrack = ntrack + 1
     end do
     allocate(track_id(ntrack))
+    allocate(mask(maxp))
     ! store particle IDs
     rewind(iu)
     do i=1,ntrack
-        read(iu,*) track_id(i)
+       read(iu,*) track_id(i)
     end do
-    close(iu) 
-    print*, "Tracking ", ntrack, " particles"
-
-   ! create mask array to only compute chemistry for tracked particles
-    if (.not.allocated(mask)) then
-       allocate(mask(npart))
-    endif
-    mask = .false.
-    do i=1,ntrack
-       do j=1,npart
-          if (iorig(j) == track_id(i)) then
-             mask(j) = .true.
-          endif
-       enddo
-    enddo
-
- if (.not.done_init) then
+   close(iu) 
+   print*, "Tracking ", ntrack, " particles"
+   
    ! Initialise KROME and abundances
     done_init = .true.
     print*, "initialising KROME"
     call krome_init()
     print*, "Initialised KROME"
     abundance_label(:) = krome_get_names()
-    allocate(abundance(krome_nmols,npart))
+    allocate(abundance(krome_nmols,maxp))
     abundance = 0.
-    allocate(abundance_prev(krome_nmols,npart))
+    allocate(abundance_prev(krome_nmols,maxp))
     abundance_prev = 0.
-    allocate(one(npart))
+    allocate(one(maxp))
     one = 1.
-    allocate(iorig_old(npart))
+    allocate(iorig_old(maxp))
     iorig_old = 0
-    allocate(iprev(npart))
+    allocate(iprev(maxp))
     iprev = 0
     print*, "setting abundances"
+
    !$omp parallel do default(none) &
    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev) &
-   !$omp shared(abundance,mask, abundance_prev,particlemass,unit_density) &
+   !$omp shared(abundance, abundance_prev,particlemass,unit_density) &
    !$omp shared(ieos,rho_cgs,T_gas,j) &
    !$omp private(i,abundance_part)
     do i=1, npart
@@ -139,7 +145,6 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
     xyzh_copy = xyzh(:,:npart)
     call set_linklist(npart_copy,npart_copy,xyzh_copy,vxyzu)
     call get_all_tau(npart, nptmass, xyzmh_ptmass, xyzh, one, 5, .false., column_density)
-
     max_radius = 0.0
     do i = 1, npart
        if (.not.isdead_or_accreted(xyzh(4, i))) then
@@ -150,15 +155,23 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
           endif
        endif
     enddo
-    column_density = column_density + rhoh(xyzh(4,i_radius),particlemass)*unit_density * max_radius * udist
 
-     
+    column_density = column_density + rhoh(xyzh(4,i_radius),particlemass)*unit_density * max_radius * udist
+    ! update mask array to only compute chemistry for tracked particles
+    mask = .false.
+    do i=1,ntrack
+       do j=1,npart
+          if (iorig(j) == track_id(i)) then
+             mask(j) = .true.
+          endif
+       enddo
+    enddo
     !$omp parallel do default(none) &
-    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose) &
+    !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose, dir) &
     !$omp shared(abundance,abundance_prev,particlemass,unit_density, mask, time, utime) &
     !$omp shared(ieos,gamma,gmw,completed_iterations,column_density,AuvAv,albedo) &
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
-    !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,filename,iu,isize)
+    !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,radius,filename,iu,isize)
     outer: do i=1,npart
        if (mask(i) ==.true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
           inner: do j=1,nprev
@@ -180,36 +193,35 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
              numberdensity = rho_cgs / (mui * atomic_mass_unit)
              T_gas = get_temperature(ieos,xyzh(1:3, i),rhoh(xyzh(4,i),particlemass),vxyzu(:,i),gammai,mui)
              T_gas = max(T_gas,20.0d0)
+             radius = sqrt(xyzh(1, i)**2 + xyzh(2, i)**2 + xyzh(3, i)**2)
 
              !Radiation quantities
              AUV = AuvAv * column_density(i) / (mui * atomic_mass_unit) / 1.87e21
              xi = get_xi(AUV)
-
              call krome_set_user_Auv(AUV)
              call krome_set_user_xi(xi)
              call krome_set_user_alb(albedo)
              call krome_set_user_AuvAv(AuvAv)
-
              Y = abundance_part*numberdensity
              call krome(Y,T_gas,dt_cgs)
              abundance_part = Y/numberdensity
              abundance(:,i) = abundance_part
-            
+      
             !$omp critical
             write(filename, '(i6)') iorig(i)
-            inquire(file='../'//filename//'.chem', size=isize)
+            inquire(file=trim(dir)//trim(adjustl(filename))//'.chem', size=isize)
             if (isize == -1) then
-               open(iu, file='../'//filename//'.chem', status='new', action='write')
+               open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='new', action='write')
                print *, 'Creating new file for particle ', iorig(i)
-               write(iu, *) '# time(s), rho (g/cm3), T (K), mu, A_UV, xi, H, He, C, N, O, S, Fe, Si, Mg, Na, P, F, CO, C2H2, C2H, H2, SiNC, e-'
+               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   H   He   C   N   O   S   Fe   Si   Mg   Na   P   F   CO   C2H2   C2H   H2   SiNC   e-'
             else if (isize == 0) then
-               open(iu, file='../'//filename//'.chem', status='old', action='write')
+               open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write')
                print *, 'Filling empty file for particle ', iorig(i)
-               write(iu, *) '# time(s), rho (g/cm3), T (K), mu, A_UV, xi, H, He, C, N, O, S, Fe, Si, Mg, Na, P, F, CO, C2H2, C2H, H2, SiNC, e-'
+               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   H   He   C   N   O   S   Fe   Si   Mg   Na   P   F   CO   C2H2   C2H   H2   SiNC   e-'
             else
-               open(iu, file='../'//filename//'.chem', status='old', action='write', position='append')
+               open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write', position='append')
             endif
-            write(iu, *) time*utime , rho_cgs, T_gas, mui, AUV, xi, &
+            write(iu, *) time*utime, radius, rho_cgs, T_gas, mui, AUV, xi, &
              abundance(krome_idx_H, i),  abundance(krome_idx_He, i),   abundance(krome_idx_C, i),  &
             abundance(krome_idx_N, i),  abundance(krome_idx_O, i),    abundance(krome_idx_S, i),   &
             abundance(krome_idx_Fe, i), abundance(krome_idx_Si, i),   abundance(krome_idx_Mg, i),  &
