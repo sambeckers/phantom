@@ -61,7 +61,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
                 , rholist(npart), Tlist(npart), mulist(npart), Auvlist(npart), xilist(npart)
  real          :: abundance_part(krome_nmols), Y(krome_nmols), column_density(npart), xyzh_copy(4,npart)
  real          :: max_radius, radius
- integer       :: i, j, i_radius, ierr, completed_iterations, npart_copy = 0
+ integer       :: i, j, k, i_radius, ierr, completed_iterations, npart_copy = 0
  integer       :: iu=10,ios
  character(len=6) :: filename
  integer :: isize
@@ -168,10 +168,10 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
     enddo
     !$omp parallel do default(none) &
     !$omp shared(npart,xyzh,vxyzu,dt_cgs,nprev,iorig,iorig_old,iprev,iverbose, dir) &
-    !$omp shared(abundance,abundance_prev,particlemass,unit_density, mask, time, utime) &
+    !$omp shared(abundance,abundance_label,abundance_prev,particlemass,unit_density, mask, time, utime) &
     !$omp shared(ieos,gamma,gmw,completed_iterations,column_density,AuvAv,albedo) &
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
-    !$omp private(i,j,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,radius,filename,iu,isize)
+    !$omp private(i,j,k,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,radius,filename,iu,isize)
     outer: do i=1,npart
        if (mask(i) ==.true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
           inner: do j=1,nprev
@@ -213,21 +213,22 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
             if (isize == -1) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='new', action='write')
                print *, 'Creating new file for particle ', iorig(i)
-               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   H   He   C   N   O   S   Fe   Si   Mg   Na   P   F   CO   C2H2   C2H   H2   SiNC   e-'
+               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols) 
             else if (isize == 0) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write')
                print *, 'Filling empty file for particle ', iorig(i)
-               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   H   He   C   N   O   S   Fe   Si   Mg   Na   P   F   CO   C2H2   C2H   H2   SiNC   e-'
+               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols)
             else
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write', position='append')
-            endif
-            write(iu, *) time*utime, radius, rho_cgs, T_gas, mui, AUV, xi, &
-             abundance(krome_idx_H, i),  abundance(krome_idx_He, i),   abundance(krome_idx_C, i),  &
-            abundance(krome_idx_N, i),  abundance(krome_idx_O, i),    abundance(krome_idx_S, i),   &
-            abundance(krome_idx_Fe, i), abundance(krome_idx_Si, i),   abundance(krome_idx_Mg, i),  &
-            abundance(krome_idx_Na, i), abundance(krome_idx_P, i),    abundance(krome_idx_F, i),   &
-            abundance(krome_idx_CO, i), abundance(krome_idx_C2H2, i), abundance(krome_idx_C2H, i), &
-            abundance(krome_idx_H2, i), abundance(krome_idx_SiNC, i), abundance(krome_idx_e, i)   
+            endif 
+             ! write physical parameters to file
+             print*, time*utime, radius, rho_cgs, T_gas, mui, AUV, xi
+             write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F6.3,1x,F8.3,1x,F8.3,1x)',advance="no") time*utime, radius, rho_cgs, T_gas, mui, AUV, xi
+             ! write abundances to file
+            do k=1,krome_nmols
+               write(iu, '(ES14.7,1x)', advance="no") abundance_part(k)
+            enddo
+            write(iu,*) ! new line
             close(iu)
             !$omp end critical
           endif
