@@ -67,13 +67,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
  integer :: isize
 
  if (.not.done_init) then
-    ! read file with particle IDs to track and store IDs in array
-    open(iu, file='particle_IDs.txt', status='old', action='read', iostat=ios)
-    if (ios /= 0) call fatal(analysistype, "Could not open particle ID file")
-    print*, "Reading particle IDs from particle_IDs.txt"
-
-    ! make directory to store individual particle chemistry files in dumpfile directory
-    ! get path from dumpfile
+    ! find current directory
     dir = dumpfile
     do i=len_trim(dir),1,-1
        if (dir(i:i) == '/') then
@@ -81,6 +75,14 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
           exit
        endif
     enddo
+
+    ! read file with particle IDs to track and store IDs in array
+    open(iu, file=trim(dir)//'particle_IDs.txt', status='old', action='read', iostat=ios)
+    if (ios /= 0) call fatal(analysistype, "Could not open particle ID file")
+    print*, "Reading particle IDs from particle_IDs.txt"
+
+    ! make directory to store individual particle chemistry files in dumpfile directory
+    ! get path from dumpfile
     dir = trim(dir)//'chem_output/'
     print *, "Creating directory for chemistry output in ", dir
     inquire(file=dir, exist=ios)
@@ -213,17 +215,16 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
             if (isize == -1) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='new', action='write')
                print *, 'Creating new file for particle ', iorig(i)
-               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols) 
+               write(iu, *) '# time(s)   radius(AU)   n(cm-3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols) 
             else if (isize == 0) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write')
                print *, 'Filling empty file for particle ', iorig(i)
-               write(iu, *) '# time(s)   radius(AU)   rho(g/cm3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols)
+               write(iu, *) '# time(s)   radius(AU)   n(cm-3)   T(K)   mu   A_UV   xi   ', (abundance_label(k), k=1,krome_nmols)
             else
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='old', action='write', position='append')
             endif 
              ! write physical parameters to file
-             print*, time*utime, radius, rho_cgs, T_gas, mui, AUV, xi
-             write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F6.3,1x,F8.3,1x,F8.3,1x)',advance="no") time*utime, radius, rho_cgs, T_gas, mui, AUV, xi
+             write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F6.3,1x,F8.3,1x,F8.3,1x)',advance="no") time*utime, radius, numberdensity, T_gas, mui, AUV, xi
              ! write abundances to file
             do k=1,krome_nmols
                write(iu, '(ES14.7,1x)', advance="no") abundance_part(k)
