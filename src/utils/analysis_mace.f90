@@ -63,7 +63,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
  real          :: max_radius, radius
  integer       :: i, j, k, i_radius, ierr, completed_iterations, npart_copy = 0
  integer       :: iu=10,ios
- character(len=6) :: filename
+ character(len=9) :: filename
  integer :: isize
 
  if (.not.done_init) then
@@ -210,7 +210,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
              abundance(:,i) = abundance_part
       
             !$omp critical
-            write(filename, '(i6)') iorig(i)
+            write(filename, '(i9)') iorig(i)
             inquire(file=trim(dir)//trim(adjustl(filename))//'.chem', size=isize)
             if (isize == -1) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.chem', status='new', action='write')
