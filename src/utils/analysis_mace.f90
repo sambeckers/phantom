@@ -11,7 +11,7 @@ module analysis
 !
 ! :References: None
 !
-! :Owner: Esseldeurs Mats
+! :Owner: Camille Landri
 !
 ! :Runtime parameters: None
 !
