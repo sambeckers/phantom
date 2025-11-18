@@ -32,7 +32,8 @@ module analysis
  real :: AuvAv = 4.65, albedo = 0.5
 
  integer :: ntrack = 0
- integer, allocatable :: track_id(:), mask(:)
+ integer, allocatable :: track_id(:)
+ logical, allocatable :: mask(:)
  character(len=256) :: dir
 
 contains
@@ -175,7 +176,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
     !$omp shared(rholist,Tlist,mulist,Auvlist,xilist,iphase) &
     !$omp private(i,j,k,abundance_part,Y,rho_cgs,numberdensity,T_gas,gammai,mui,AUV,xi,radius,filename,iu,isize)
     outer: do i=1,npart
-       if (mask(i) ==.true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
+       if (mask(i) .eqv. true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
           inner: do j=1,nprev
              if (iorig(i) == iorig_old(j)) then
                 iprev(i) = j

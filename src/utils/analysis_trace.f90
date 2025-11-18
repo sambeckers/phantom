@@ -49,18 +49,19 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  integer,          intent(in) :: num,npart,iunit
  real,             intent(in) :: xyzh(:,:),vxyzu(:,:)
  real,             intent(in) :: particlemass,time
+ real, save    :: tprev = 0.
  integer, save :: nprev = 0
- real          :: rho_cgs, numberdensity, T_gas, gammai, mui, AUV
+ real          :: dt_cgs, rho_cgs, numberdensity, T_gas, gammai, mui, AUV
  real          :: column_density(npart), xyzh_copy(4,npart)
  real          :: max_radius, radius
- integer       :: i, j, k, i_radius, completed_iterations, npart_copy = 0
- integer       :: iu=10,ios, ierr
+ integer       :: i, j, k, i_radius, ierr, completed_iterations, npart_copy = 0
+ integer       :: iu=10,ios
  logical       :: iexist
  character(len=9) :: filename
  integer :: isize
 
  if (.not.done_init) then
-      allocate(one(npart))
+      allocate(one(maxp))
       one = 1.0
       allocate(iorig_old(maxp))
       allocate(iprev(maxp))
@@ -108,7 +109,9 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
       if (ierr /= 0) call fatal(analysistype, "Failed to initialise EOS")
    
    else
+      dt_cgs = (time - tprev)*utime
       completed_iterations = 0
+      print*, dumpfile, ": not first step data, timestep = ",dt_cgs, "npart = ",npart, "nprev = ",nprev
       xyzmh_ptmass(iReff,1) = 2.
       npart_copy = npart
       xyzh_copy = xyzh(:,:npart)
@@ -166,16 +169,17 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
             if (isize == -1) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.phys', status='new', action='write')
                print *, 'Creating new file for particle ', iorig(i)
-               write(iu, *) '# time(s)   x(AU)   Y(AU)   Z(AU)   n(cm-3)   T(K)   A_UV'
+               write(iu, *) '# time(s)   X(AU)   Y(AU)   Z(AU)   n(cm-3)   T(K)   A_UV'
             else if (isize == 0) then
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.phys', status='old', action='write')
                print *, 'Filling empty file for particle ', iorig(i)
-               write(iu, *) '# time(s)   x(AU)   Y(AU)   Z(AU)   n(cm-3)   T(K)   A_UV'
+               write(iu, *) '# time(s)   X(AU)   Y(AU)   Z(AU)   n(cm-3)   T(K)   A_UV'
             else
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.phys', status='old', action='write', position='append')
             endif 
                ! write physical parameters to file
-               write(iu, *) time*utime, xyzh(1, i), xyzh(2, i), xyzh(3, i), numberdensity, T_gas, AUV
+               write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F8.3,1x)')&
+                time*utime, xyzh(1, i), xyzh(2, i), xyzh(3, i), column_density(i), T_gas, AUV
             close(iu)
             !$omp end critical
             endif
