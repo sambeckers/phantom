@@ -202,14 +202,17 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
          call krome_set_user_xi(xi)
          call krome_set_user_alb(albedo)
          call krome_set_user_AuvAv(AuvAv)
+
+         ! Run KROME to update abundances
           if (j == iprev(i)) then
+            ! Use previous abundances if found in previous step
              abundance_part(:) = abundance_prev(:,iprev(i))
              Y = abundance_part*numberdensity
              call krome(Y,T_gas,dt_cgs)
              abundance_part = Y/numberdensity
              abundance(:,i) = abundance_part
           else
-            ! If particle not found in previous step, initialize abundances and write to file, then skip to next particle
+            ! If particle not found in previous step, just initialize abundances
             ! (otherwise the initial abundances would not be included in the output files)
             call chem_init(abundance_part)
             print*, "Particle ", iorig(i), " not found in previous step, initializing abundances"
@@ -217,7 +220,7 @@ use krome_user, only: krome_idx_He,krome_idx_C,krome_idx_N,krome_idx_O,&
           endif
          ! write chemistry data to individual particle file
          !$omp critical
-         call write_chem(iorig(i),abundance_part,time*utime,radius/udist,numberdensity,T_gas,mui,AUV,xi,abundance_label,dir)
+         call write_chem(iorig(i),abundance_part,time*utime,radius*udist,numberdensity,T_gas,mui,AUV,xi,abundance_label,dir)
          !$omp end critical
 
 
