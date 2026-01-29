@@ -179,7 +179,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
             endif 
                ! write physical parameters to file
                write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F8.3,1x)')&
-                time*utime, xyzh(1, i), xyzh(2, i), xyzh(3, i), column_density(i), T_gas, AUV
+                time*utime, xyzh(1, i), xyzh(2, i), xyzh(3, i), numberdensity, T_gas, AUV
             close(iu)
             !$omp end critical
             endif
