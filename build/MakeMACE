@@ -1,0 +1,18 @@
+
+.PHONY: clean_mace mace_setup mace
+
+ FTorch_PATH = /home/camille/software/FTorchbin
+ DVODE_PATH = /STER/hydroModels/camille/phantom/macetraining/MACE/MACE_fortran/dvode
+
+
+mace_setup:
+	@echo "setup of MACE files not implemented"
+
+mace:
+	cp ${FTorch_PATH}/include/ftorch/ftorch.mod ${PHANTOM_DIR}/build/
+	cp ${FTorch_PATH}/lib/libftorch.so ${PHANTOM_DIR}/build/
+	cp ${DVODE_PATH}/include/* ${PHANTOM_DIR}/build/
+
+
+clean_mace:
+	@echo "cleaning of MACE files not implemented"

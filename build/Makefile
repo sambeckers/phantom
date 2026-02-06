@@ -109,6 +109,19 @@ else
     SRCINJECT=utils_binary.f90 set_binary.f90 inject_wind.f90
 endif
 
+#--- MACE (postprocessing only for now)
+ifeq ($(MACE), yes)
+    ANALYSIS=analysis_mace.f90
+    # requires DVODE and FTorch to be installed
+    FTorch_PATH = /home/camille/software/FTorchbin
+    DVODE_PATH = /STER/hydroModels/camille/phantom/macetraining/MACE/MACE_fortran/dvode
+    FPPFLAGS+= -DMACE
+    FFLAGS+= -I$(DVODE_PATH)/include -I$(FTorch_PATH)/include/ftorch 
+    LDFLAGS+= -L$(DVODE_PATH)/lib -ldvode -L$(FTorch_PATH)/lib -lftorch
+    LDFLAGS+= -Wl,-rpath,$(FTorch_PATH)/lib/ -Wl,-rpath,$(DVODE_PATH)/lib
+endif
+
+
 #---  live feedback from mcfost
 ifeq ($(MCFOST), yes)
     ANALYSIS= analysis_mcfost.f90
@@ -530,14 +543,28 @@ endif
 OBJECTS1 = $(SOURCES:.f90=.o)
 OBJECTS = $(OBJECTS1:.F90=.o)
 
+chemistry = no
 ifeq ($(KROME), yes)
     .PHONY: all
 
     all: checksystem checkparams krome_setup krome phantom
     include MakeKrome
-else
+    chemistry = yes
+endif
+
+ifeq ($(MACE), yes)
+    .PHONY: all
+
+    all: checksystem checkparams mace_setup mace phantom
+    include MakeMACE
+    chemistry = yes
+endif 
+
+ifeq ($(chemistry), no)
     .PHONY: phantom
 endif
+
+
 
 phantom: checksystem checkparams $(OBJECTS) phantom.o
 	$(FC) $(FFLAGS) -o $(BINDIR)/$@ $(OBJECTS) phantom.o $(LDFLAGS)
@@ -554,6 +581,16 @@ ifeq ($(KROME), yes)
 	@echo ""
 	@echo "========================================="
 endif
+
+ifeq ($(MACE), yes)
+	@echo ""
+	@echo "=============== CHEMISTRY ==============="
+	@echo ""
+	@echo "MACE coupling status = enabled"
+	@echo ""
+	@echo "========================================="
+endif
+
 	@sh ../scripts/phantom_version_gen.sh "$(IDFLAGS)"
 	@echo ""
 	@echo "The Phantom is here (in $(BINDIR)/phantom)"
