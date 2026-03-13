@@ -61,6 +61,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  real(8), allocatable :: av_val_tmp(:)
  character(len=40) :: avfile
  integer :: iu_av
+ namelist /trace_config/ id_start, id_end, n_boundary
 
  if (.not.done_init) then
       allocate(one(maxp))
@@ -82,7 +83,6 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
       open(iu, file='trace.cfg', status='old', action='read', iostat=ios)
       if (ios /= 0) call fatal(analysistype, &
          "Could not open trace.cfg. Create it with: &trace_config id_start=1, id_end=10000, n_boundary=0 /")
-      namelist /trace_config/ id_start, id_end, n_boundary
       read(iu, nml=trace_config, iostat=ios)
       if (ios /= 0) call fatal(analysistype, "Failed to read trace.cfg namelist &trace_config")
       close(iu)
@@ -151,12 +151,14 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
       enddo
       !$omp parallel do default(none) &
       !$omp shared(npart,xyzh,vxyzu,nprev,iorig,iorig_old,iprev,iverbose,dir) &
-      !$omp shared(particlemass,unit_density,mask,time,utime,iphase) &
+      !$omp shared(particlemass,unit_density,mask,time,utime,iphase,n_boundary,id_start,id_end) &
       !$omp shared(ieos,gamma,gmw,completed_iterations,av_lookup) &
       !$omp private(i,j,k,rho_cgs,numberdensity,T_gas,gammai,mui,AV,filename,iu,isize)
       outer: do i=1,npart
          iu = 10
          if (mask(i) .eqv. .true. .and. .not.isdead_or_accreted(xyzh(4,i))) then
+            ! never write particles outside configured ID range.
+            if (iorig(i) < id_start .or. iorig(i) > id_end) cycle outer
             inner: do j=1,nprev
                if (iorig(i) == iorig_old(j)) then
                   iprev(i) = j
@@ -190,7 +192,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
                open(iu, file=trim(dir)//trim(adjustl(filename))//'.phys', status='old', action='write', position='append')
             endif 
                ! write physical parameters to file
-               write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F8.3,1x)')&
+               write(iu, '(ES16.8,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,ES14.7,1x,F8.2,1x,F10.8,1x)')&
                 time*utime, xyzh(1, i), xyzh(2, i), xyzh(3, i), numberdensity, T_gas, AV
             close(iu)
             !$omp end critical
